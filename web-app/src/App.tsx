@@ -1858,7 +1858,7 @@ Try these examples:
                 <label className="block text-gray-300 font-medium mb-1.5 flex items-center justify-between">
                   <span>Nebius Token Factory API Key</span>
                   <a 
-                    href="https://api.tokenfactory.nebius.com/docs" 
+                    href="https://api.tokenfactory.nebius.com/docs"
                     target="_blank" 
                     rel="noreferrer"
                     className="text-xs text-cyan-accent hover:underline flex items-center gap-1"
