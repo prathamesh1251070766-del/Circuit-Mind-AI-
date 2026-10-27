@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Cpu, User, LayoutGrid, Bot, AlertTriangle, CheckCircle2, CircleDashed, Zap, Activity, DollarSign, Package, Shuffle, X, Layers, Maximize, Eye, ClipboardList, Download, ShieldCheck, XCircle, Play, LineChart, PlayCircle, Database, UploadCloud, FileText, Server, BookOpen, FileCode2, Sparkles, Search, Settings, ExternalLink, RefreshCw } from 'lucide-react';
 import KicadWorkspace from './components/KicadWorkspace';
 import circuitMindLogo from './assets/circuitmind-logo.png';
+import { buildEngineeringState, type EngineeringProjectState } from './utils/engineeringAgent';
 
 interface Message {
   id: string;
@@ -387,6 +388,7 @@ export default function App() {
   ]);
   const [constraints, setConstraints] = useState<Constraints>({ known: [], missing: [] });
   const [circuit, setCircuit] = useState<CircuitData | null>(null);
+  const [engineeringState, setEngineeringState] = useState<EngineeringProjectState | null>(null);
   const [selectedComponent, setSelectedComponent] = useState<CircuitComponent | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
@@ -404,10 +406,10 @@ export default function App() {
 
   // API Key & Model Configuration
   const [apiKey, setApiKey] = useState<string>(() => {
-    return localStorage.getItem('circuitmind_api_key') || import.meta.env.VITE_OPENROUTER_API_KEY || '';
+    return localStorage.getItem('circuitmind_nebius_api_key') || import.meta.env.VITE_NEBIUS_API_KEY || '';
   });
   const [selectedModel, setSelectedModel] = useState<string>(() => {
-    return localStorage.getItem('circuitmind_model') || import.meta.env.VITE_OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct:free';
+    return localStorage.getItem('circuitmind_nebius_model') || import.meta.env.VITE_NEBIUS_MODEL || 'nvidia/Nemotron-3_5-Lightning';
   });
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [tempApiKey, setTempApiKey] = useState('');
@@ -476,6 +478,7 @@ export default function App() {
       ]
     };
     setCircuit(demoCircuit);
+    setEngineeringState(buildEngineeringState('Design a 5V buck converter using TPS54331.', demoCircuit));
     setConstraints({
       known: [{ name: "Output Voltage", value: "5V" }, { name: "IC", value: "TPS54331" }],
       missing: ["Max Input Voltage", "Target Output Current", "Ripple Requirement"]
@@ -527,26 +530,23 @@ export default function App() {
 
   const handleValidateKey = async (keyToTest: string) => {
     if (!keyToTest || !keyToTest.trim()) {
-      setKeyValidationStatus({ status: 'invalid', message: 'Please enter an OpenRouter API key.' });
+      setKeyValidationStatus({ status: 'invalid', message: 'Please enter a Nebius Token Factory API key.' });
       return;
     }
     setKeyValidationStatus({ status: 'validating' });
     try {
-      const res = await fetch('https://openrouter.ai/api/v1/auth/key', {
+      const res = await fetch('https://api.tokenfactory.nebius.com/v1/models', {
         headers: { 'Authorization': `Bearer ${keyToTest.trim()}` }
       });
       const data = await res.json();
       if (res.ok && data?.data) {
-        const info = data.data;
-        const limitStr = info.limit !== null && info.limit !== undefined ? `$${info.limit}` : 'No hard limit';
-        const usageStr = info.usage !== null && info.usage !== undefined ? `$${Number(info.usage).toFixed(3)}` : '$0.00';
         setKeyValidationStatus({
           status: 'valid',
-          message: `Connected! Label: "${info.label || 'Default'}" (Usage: ${usageStr}, Limit: ${limitStr})`
+          message: `Connected to Nebius Token Factory. ${data.data.length ?? 0} model(s) available.`
         });
       } else {
         const errMsg = data?.error?.message || `HTTP ${res.status} Unauthorized`;
-        setKeyValidationStatus({ status: 'invalid', message: `OpenRouter Error: ${errMsg}` });
+        setKeyValidationStatus({ status: 'invalid', message: `Nebius Token Factory error: ${errMsg}` });
       }
     } catch (e: any) {
       setKeyValidationStatus({ status: 'invalid', message: e.message || 'Network error verifying key.' });
@@ -555,23 +555,20 @@ export default function App() {
 
   const handleSaveSettings = () => {
     const trimmedKey = tempApiKey.trim();
-    const finalModel = (tempModel === 'custom' ? customModelInput : tempModel).trim() || 'meta-llama/llama-3.3-70b-instruct:free';
+    const finalModel = (tempModel === 'custom' ? customModelInput : tempModel).trim() || 'nvidia/Nemotron-3_5-Lightning';
     setApiKey(trimmedKey);
     setSelectedModel(finalModel);
-    localStorage.setItem('circuitmind_api_key', trimmedKey);
-    localStorage.setItem('circuitmind_model', finalModel);
+    localStorage.setItem('circuitmind_nebius_api_key', trimmedKey);
+    localStorage.setItem('circuitmind_nebius_model', finalModel);
     setShowSettingsModal(false);
   };
 
   const openSettings = () => {
     setTempApiKey(apiKey);
     const standardModels = [
-      'meta-llama/llama-3.3-70b-instruct:free',
-      'google/gemini-2.0-flash-lite-preview-02-05:free',
-      'qwen/qwen-2.5-72b-instruct:free',
-      'mistralai/mistral-small-24b-instruct-2501:free',
-      'deepseek/deepseek-chat:free',
-      'nvidia/nemotron-3.5-lightning:free'
+      'nvidia/Nemotron-3_5-Lightning',
+      'nvidia/Nemotron-3-Nano-30B-A3B',
+      'nvidia/Nemotron-3-Super-120B-A12B'
     ];
     if (standardModels.includes(selectedModel)) {
       setTempModel(selectedModel);
@@ -612,7 +609,7 @@ Try these examples:
 • **"Design a 1kHz square wave oscillator using a 555 timer."**
 • **"Design a 5V to 3.3V linear regulator circuit with AMS1117."**
 
-*(Note: You can configure or test your OpenRouter API key anytime via the ⚙️ Settings button in the header.)*`
+*(Note: Configure NVIDIA Nemotron through Nebius Token Factory in Settings.)*`
         }]);
         setIsLoading(false);
         return;
@@ -702,7 +699,9 @@ Try these examples:
         const circuitMatch = botResponse.match(/<circuit>([\s\S]*?)<\/circuit>/);
         if (circuitMatch) {
           try {
-            setCircuit(JSON.parse(circuitMatch[1]));
+            const parsedCircuit = JSON.parse(circuitMatch[1]) as CircuitData;
+            setCircuit(parsedCircuit);
+            setEngineeringState(buildEngineeringState(promptToSend, parsedCircuit));
             botResponse = botResponse.replace(circuitMatch[0], '').trim();
           } catch (e) { console.error(e); }
         }
@@ -720,15 +719,13 @@ Try these examples:
       let usedLocalSynthesizer = false;
       let apiErrorMessage = '';
 
-      const activeKey = apiKey && apiKey !== 'your_openrouter_api_key_here' ? apiKey : '';
+      const activeKey = apiKey && apiKey !== 'your_nebius_api_key_here' ? apiKey : '';
 
       if (activeKey) {
         try {
-          const systemPrompt = `You are CircuitMind AI, an expert electronic design automation (EDA) assistant.
-Output constraints in <constraints>...</constraints> JSON block and circuit architecture in <circuit>...</circuit> JSON block.
-Include components with id, name, type, pins, intelligence (price, stock, supplier, specs, alternatives), and nets with name, type (power/gnd/signal), and connections.`;
+          const systemPrompt = `You are CircuitMind AI, an expert electronic design automation assistant. Return engineering decisions only when supported by the prompt; label unknowns as assumptions or missing requirements. Output constraints in <constraints>...</constraints> JSON and a circuit graph in <circuit>...</circuit> JSON. Include components with id, name, type, pins, intelligence (price, stock, supplier, specs, alternatives), and nets with name, type (power/gnd/signal), and connections. Never claim ERC, DRC, SPICE, stock, or datasheet verification unless evidence is supplied.`;
 
-          const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          const response = await fetch('https://api.tokenfactory.nebius.com/v1/chat/completions', {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${activeKey}`,
@@ -737,7 +734,7 @@ Include components with id, name, type, pins, intelligence (price, stock, suppli
               'X-Title': 'CircuitMind AI'
             },
             body: JSON.stringify({
-              model: selectedModel || 'meta-llama/llama-3.3-70b-instruct:free',
+              model: selectedModel || 'nvidia/Nemotron-3_5-Lightning',
               messages: [
                 { role: 'system', content: systemPrompt },
                 ...messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content })),
@@ -754,14 +751,14 @@ Include components with id, name, type, pins, intelligence (price, stock, suppli
                 detail = errBody.error.message;
               }
             } catch {}
-            throw new Error(`OpenRouter API: ${detail}`);
+            throw new Error(`Nebius Token Factory API: ${detail}`);
           }
 
           const data = await response.json();
           botResponse = data.choices[0].message.content;
         } catch (apiErr: any) {
-          console.warn('OpenRouter API call failed:', apiErr);
-          apiErrorMessage = apiErr.message || 'Failed to communicate with OpenRouter API.';
+          console.warn('Nebius Token Factory API call failed:', apiErr);
+          apiErrorMessage = apiErr.message || 'Failed to communicate with Nebius Token Factory.';
           
           // Fallback to built-in hardware synthesis engine
           const localFallback = generateBuiltinCircuit(promptToSend);
@@ -779,7 +776,7 @@ Include components with id, name, type, pins, intelligence (price, stock, suppli
           botResponse = localFallback;
           usedLocalSynthesizer = true;
         } else {
-          throw new Error('API key missing or expired. Click ⚙️ Settings in the header to enter a valid OpenRouter API key, or try one of the built-in circuits (Voltage Divider, TPS54331, 555 Timer).');
+          throw new Error('Nebius Token Factory API key is missing or unavailable. Open Settings to configure NVIDIA Nemotron, or try a built-in circuit workflow.');
         }
       }
 
@@ -796,14 +793,16 @@ Include components with id, name, type, pins, intelligence (price, stock, suppli
       const circuitMatch = botResponse.match(/<circuit>([\s\S]*?)<\/circuit>/);
       if (circuitMatch) {
         try {
-          setCircuit(JSON.parse(circuitMatch[1]));
+            const parsedCircuit = JSON.parse(circuitMatch[1]) as CircuitData;
+            setCircuit(parsedCircuit);
+            setEngineeringState(buildEngineeringState(promptToSend, parsedCircuit));
           botResponse = botResponse.replace(circuitMatch[0], '').trim();
         } catch (e) { console.error(e); }
       }
 
       let finalBotMessage = botResponse;
       if (usedLocalSynthesizer && apiErrorMessage) {
-        finalBotMessage = `> ⚠️ **OpenRouter Notice**: ${apiErrorMessage}\n> *Architecture synthesized via CircuitMind Local Hardware Engine.*\n\n` + botResponse;
+        finalBotMessage = `> ⚠️ **Nebius notice**: ${apiErrorMessage}\n> *Architecture synthesized by the local deterministic workflow; it is not an AI-verified result.*\n\n` + botResponse;
       }
 
       setMessages(prev => [...prev, {
@@ -875,11 +874,15 @@ Include components with id, name, type, pins, intelligence (price, stock, suppli
             <button
               onClick={openSettings}
               className="p-1.5 px-2.5 rounded-lg text-gray-300 hover:text-white bg-charcoal-700/70 hover:bg-charcoal-700 border border-charcoal-600 transition-colors flex items-center gap-1.5 text-xs cursor-pointer shadow-sm"
-              title="Configure OpenRouter API Key & Model"
+              title="Configure Nebius Token Factory & NVIDIA Nemotron"
             >
               <Settings size={14} className="text-cyan-accent" />
               <span>Settings</span>
             </button>
+          </div>
+
+          <div className="px-4 py-2 border-b border-charcoal-700/70 text-[10px] font-mono text-gray-500 flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-accent"></span> NVIDIA NEMOTRON VIA NEBIUS TOKEN FACTORY
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 text-sm">
@@ -1025,6 +1028,30 @@ Include components with id, name, type, pins, intelligence (price, stock, suppli
                     </div>
                   ) : (
                     <div className="flex flex-col gap-8 max-w-4xl mx-auto">
+                      {engineeringState && (
+                        <section className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                          <div className="xl:col-span-2 bg-charcoal-800 border border-charcoal-700 rounded-xl p-4">
+                            <div className="flex items-center justify-between mb-3">
+                              <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2"><Bot size={14} className="text-cyan-accent" /> AI Engineering State</h3>
+                              <span className="text-[10px] font-mono text-cyan-accent">STRUCTURED • TRACEABLE</span>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div>
+                                <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">Captured requirements</p>
+                                <div className="space-y-1.5">{engineeringState.requirements.slice(0, 4).map(requirement => <div key={requirement.name} className="flex justify-between gap-2 text-xs bg-charcoal-900/70 rounded px-2 py-1.5"><span className="text-gray-300">{requirement.name}: {requirement.value}</span><span className="text-cyan-accent text-[9px] shrink-0">{requirement.status}</span></div>)}</div>
+                              </div>
+                              <div>
+                                <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">Needs confirmation</p>
+                                <div className="space-y-1.5">{engineeringState.unresolvedQuestions.slice(0, 3).map(question => <div key={question} className="text-xs text-yellow-200 bg-yellow-500/5 border border-yellow-500/15 rounded px-2 py-1.5">{question}</div>)}</div>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="bg-charcoal-800 border border-charcoal-700 rounded-xl p-4">
+                            <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-3">Agent activity</h3>
+                            <div className="space-y-2">{engineeringState.activity.map(activity => <div key={activity.label} className="text-xs"><div className="flex items-center gap-2 text-gray-200"><span className={`w-1.5 h-1.5 rounded-full ${activity.status === 'completed' ? 'bg-green-400' : 'bg-yellow-400'}`}></span>{activity.label}</div><p className="text-[10px] text-gray-500 mt-0.5 ml-3.5">{activity.detail}</p></div>)}</div>
+                          </div>
+                        </section>
+                      )}
                       <div>
                         <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2"><Cpu size={16} className="text-cyan-accent" /> Components</h3>
                         <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1502,7 +1529,7 @@ Include components with id, name, type, pins, intelligence (price, stock, suppli
             <div className="flex-1 flex flex-col w-full h-full">
               <header className="h-16 flex items-center justify-between px-6 bg-charcoal-800 border-b border-charcoal-700 shrink-0 z-10">
                 <h1 className="text-white font-semibold">ERC & DRC Validation</h1>
-                <button className="px-4 py-1.5 flex items-center gap-2 bg-cyan-accent text-charcoal-900 text-sm font-semibold rounded-lg hover:bg-teal-accent transition-colors shadow-[0_0_15px_rgba(0,210,255,0.3)]">
+                <button onClick={() => circuit && setEngineeringState(buildEngineeringState(messages[messages.length - 1]?.content || '', circuit))} className="px-4 py-1.5 flex items-center gap-2 bg-cyan-accent text-charcoal-900 text-sm font-semibold rounded-lg hover:bg-teal-accent transition-colors shadow-[0_0_15px_rgba(0,210,255,0.3)]">
                   <Play size={16} /> Run Full Check
                 </button>
               </header>
@@ -1516,99 +1543,19 @@ Include components with id, name, type, pins, intelligence (price, stock, suppli
                 ) : (
                   <div className="max-w-5xl mx-auto flex flex-col gap-8">
                     
-                    {/* Summary Banner */}
-                    <div className="bg-charcoal-800 border border-red-500/30 rounded-xl p-6 shadow-[0_0_20px_rgba(239,68,68,0.1)] flex items-center justify-between">
-                       <div>
-                         <h2 className="text-lg font-bold text-white flex items-center gap-2 mb-1">
-                           <AlertTriangle size={20} className="text-red-400" /> Validation Failed
-                         </h2>
-                         <p className="text-sm text-gray-400">CircuitMind AI found 1 Error and 1 Warning in your design.</p>
-                       </div>
-                       <div className="flex gap-4">
-                         <div className="flex flex-col items-center bg-charcoal-900 px-4 py-2 rounded-lg border border-charcoal-700">
-                           <span className="text-2xl font-bold text-red-400">1</span>
-                           <span className="text-xs text-gray-500 uppercase font-bold">Errors</span>
-                         </div>
-                         <div className="flex flex-col items-center bg-charcoal-900 px-4 py-2 rounded-lg border border-charcoal-700">
-                           <span className="text-2xl font-bold text-yellow-400">1</span>
-                           <span className="text-xs text-gray-500 uppercase font-bold">Warnings</span>
-                         </div>
-                         <div className="flex flex-col items-center bg-charcoal-900 px-4 py-2 rounded-lg border border-charcoal-700">
-                           <span className="text-2xl font-bold text-green-400">14</span>
-                           <span className="text-xs text-gray-500 uppercase font-bold">Passed</span>
-                         </div>
-                       </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-8">
-                      {/* ERC Section */}
-                      <div>
-                        <h3 className="text-sm font-bold text-white mb-4 uppercase tracking-wider flex items-center gap-2">
-                          <Activity size={16} className="text-cyan-accent" /> Electrical Rule Check (ERC)
-                        </h3>
-                        <div className="bg-charcoal-800 border border-charcoal-700 rounded-xl overflow-hidden shadow-lg flex flex-col">
-                          
-                          <div className="p-4 border-b border-charcoal-700 flex gap-3 bg-red-500/5">
-                            <XCircle size={18} className="text-red-400 shrink-0 mt-0.5" />
-                            <div>
-                              <div className="text-sm font-bold text-white mb-1">Missing Pull-up on EN Pin</div>
-                              <div className="text-xs text-gray-400">TPS54331 EN pin (U1-EN) is floating. It must be pulled to VIN or driven by a logic signal to enable the IC.</div>
-                            </div>
-                          </div>
-
-                          <div className="p-4 border-b border-charcoal-700 flex gap-3 bg-yellow-500/5">
-                            <AlertTriangle size={18} className="text-yellow-400 shrink-0 mt-0.5" />
-                            <div>
-                              <div className="text-sm font-bold text-white mb-1">Marginal Output Capacitance</div>
-                              <div className="text-xs text-gray-400">Output capacitor C2 (47uF) is close to the minimum recommended value for a 3A load. Consider increasing to 100uF for better transient response.</div>
-                            </div>
-                          </div>
-
-                          <div className="p-4 flex gap-3 opacity-60">
-                            <CheckCircle2 size={18} className="text-green-400 shrink-0 mt-0.5" />
-                            <div>
-                              <div className="text-sm font-bold text-white">Power input valid</div>
-                              <div className="text-xs text-gray-500">VIN net is properly connected to input capacitor C1.</div>
-                            </div>
-                          </div>
-
+                    {(() => {
+                      const findings = engineeringState?.validation || buildEngineeringState('', circuit).validation;
+                      const errors = findings.filter(finding => finding.severity === 'error').length;
+                      const warnings = findings.filter(finding => finding.severity === 'warning').length;
+                      const passed = findings.filter(finding => finding.severity === 'pass').length;
+                      return <>
+                        <div className={`bg-charcoal-800 border rounded-xl p-6 flex items-center justify-between ${errors ? 'border-red-500/30' : warnings ? 'border-yellow-500/30' : 'border-green-500/30'}`}>
+                          <div><h2 className="text-lg font-bold text-white flex items-center gap-2 mb-1">{errors ? <XCircle size={20} className="text-red-400" /> : warnings ? <AlertTriangle size={20} className="text-yellow-400" /> : <CheckCircle2 size={20} className="text-green-400" />}{errors ? 'Review required' : warnings ? 'Review recommended' : 'Topology checks passed'}</h2><p className="text-sm text-gray-400">Rule-based architecture checks only. This is not a physical DRC, SPICE, or datasheet verification.</p></div>
+                          <div className="flex gap-3"><div className="text-center"><div className="text-xl font-bold text-red-400">{errors}</div><div className="text-[10px] text-gray-500">ERRORS</div></div><div className="text-center"><div className="text-xl font-bold text-yellow-400">{warnings}</div><div className="text-[10px] text-gray-500">WARNINGS</div></div><div className="text-center"><div className="text-xl font-bold text-green-400">{passed}</div><div className="text-[10px] text-gray-500">PASSED</div></div></div>
                         </div>
-                      </div>
-
-                      {/* DRC Section */}
-                      <div>
-                        <h3 className="text-sm font-bold text-white mb-4 uppercase tracking-wider flex items-center gap-2">
-                          <Layers size={16} className="text-teal-accent" /> Design Rule Check (DRC)
-                        </h3>
-                        <div className="bg-charcoal-800 border border-charcoal-700 rounded-xl overflow-hidden shadow-lg flex flex-col">
-                          
-                          <div className="p-4 border-b border-charcoal-700 flex gap-3 opacity-60">
-                            <CheckCircle2 size={18} className="text-green-400 shrink-0 mt-0.5" />
-                            <div>
-                              <div className="text-sm font-bold text-white">Clearance OK</div>
-                              <div className="text-xs text-gray-500">All traces maintain minimum 0.2mm clearance.</div>
-                            </div>
-                          </div>
-
-                          <div className="p-4 border-b border-charcoal-700 flex gap-3 opacity-60">
-                            <CheckCircle2 size={18} className="text-green-400 shrink-0 mt-0.5" />
-                            <div>
-                              <div className="text-sm font-bold text-white">Track Widths OK</div>
-                              <div className="text-xs text-gray-500">Power traces meet minimum width requirements for 3A carrying capacity.</div>
-                            </div>
-                          </div>
-
-                          <div className="p-4 flex gap-3 opacity-60">
-                            <CheckCircle2 size={18} className="text-green-400 shrink-0 mt-0.5" />
-                            <div>
-                              <div className="text-sm font-bold text-white">Component Overlap</div>
-                              <div className="text-xs text-gray-500">No courtyards overlap on the physical layout.</div>
-                            </div>
-                          </div>
-
-                        </div>
-                      </div>
-                    </div>
+                        <div className="bg-charcoal-800 border border-charcoal-700 rounded-xl overflow-hidden">{findings.map((finding, index) => <div key={finding.id} className={`p-4 flex gap-3 ${index ? 'border-t border-charcoal-700' : ''}`}><div>{finding.severity === 'error' ? <XCircle size={18} className="text-red-400" /> : finding.severity === 'warning' ? <AlertTriangle size={18} className="text-yellow-400" /> : <CheckCircle2 size={18} className="text-green-400" />}</div><div><div className="text-sm font-bold text-white">{finding.title}</div><p className="text-xs text-gray-400 mt-1">{finding.detail}</p>{finding.recommendation && <p className="text-xs text-cyan-accent mt-2">Recommended action: {finding.recommendation}</p>}</div></div>)}</div>
+                      </>;
+                    })()}
 
                   </div>
                 )}
@@ -1909,14 +1856,14 @@ Include components with id, name, type, pins, intelligence (price, stock, suppli
             <div className="p-6 space-y-5 text-sm">
               <div>
                 <label className="block text-gray-300 font-medium mb-1.5 flex items-center justify-between">
-                  <span>OpenRouter API Key</span>
+                  <span>Nebius Token Factory API Key</span>
                   <a 
-                    href="https://openrouter.ai/keys" 
+                    href="https://api.tokenfactory.nebius.com/docs" 
                     target="_blank" 
                     rel="noreferrer"
                     className="text-xs text-cyan-accent hover:underline flex items-center gap-1"
                   >
-                    Get free OpenRouter Key <ExternalLink size={11} />
+                    Nebius API documentation <ExternalLink size={11} />
                   </a>
                 </label>
                 <div className="flex gap-2">
@@ -1959,7 +1906,7 @@ Include components with id, name, type, pins, intelligence (price, stock, suppli
                   </p>
                 )}
                 <p className="mt-1.5 text-xs text-gray-500">
-                  Key is saved in browser localStorage and used directly for circuit generation.
+                  For this local prototype, the key is stored in browser localStorage. Use a server-side proxy before production deployment so the key is never exposed to visitors.
                 </p>
               </div>
 
@@ -1972,19 +1919,16 @@ Include components with id, name, type, pins, intelligence (price, stock, suppli
                   onChange={(e) => setTempModel(e.target.value)}
                   className="w-full bg-charcoal-900 border border-charcoal-700 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-cyan-accent cursor-pointer"
                 >
-                  <option value="meta-llama/llama-3.3-70b-instruct:free">meta-llama/llama-3.3-70b-instruct:free (Recommended Free)</option>
-                  <option value="google/gemini-2.0-flash-lite-preview-02-05:free">google/gemini-2.0-flash-lite-preview-02-05:free (Fast Free)</option>
-                  <option value="qwen/qwen-2.5-72b-instruct:free">qwen/qwen-2.5-72b-instruct:free (High Precision)</option>
-                  <option value="mistralai/mistral-small-24b-instruct-2501:free">mistralai/mistral-small-24b-instruct-2501:free</option>
-                  <option value="deepseek/deepseek-chat:free">deepseek/deepseek-chat:free</option>
-                  <option value="nvidia/nemotron-3.5-lightning:free">nvidia/nemotron-3.5-lightning:free</option>
-                  <option value="custom">Custom model ID...</option>
+                  <option value="nvidia/Nemotron-3_5-Lightning">NVIDIA Nemotron 3.5 Lightning — fast agent workflow</option>
+                  <option value="nvidia/Nemotron-3-Nano-30B-A3B">NVIDIA Nemotron 3 Nano — efficient workflow</option>
+                  <option value="nvidia/Nemotron-3-Super-120B-A12B">NVIDIA Nemotron 3 Super — complex reasoning</option>
+                  <option value="custom">Custom Nebius model ID...</option>
                 </select>
                 {tempModel === 'custom' && (
                   <input
                     type="text"
                     value={customModelInput}
-                    placeholder="Enter custom model ID (e.g. anthropic/claude-3.5-sonnet)"
+                    placeholder="Enter a Nebius Token Factory model ID"
                     onChange={(e) => setCustomModelInput(e.target.value)}
                     className="mt-2 w-full bg-charcoal-900 border border-charcoal-700 rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none focus:border-cyan-accent"
                   />
@@ -1996,7 +1940,7 @@ Include components with id, name, type, pins, intelligence (price, stock, suppli
                   <Sparkles size={13} className="text-cyan-accent" /> Offline Circuit Synthesizer
                 </div>
                 <p>
-                  Even if your OpenRouter key is expired or internet is offline, CircuitMind automatically generates and computes circuits for <strong>Voltage Dividers</strong>, <strong>TPS54331 Buck Regulators</strong>, <strong>555 Timers</strong>, and <strong>LDO Regulators</strong>.
+                  If Nebius is unavailable or no key is configured, CircuitMind keeps the project open and supports deterministic local workflows for <strong>Voltage Dividers</strong>, <strong>TPS54331 Buck Regulators</strong>, <strong>555 Timers</strong>, and <strong>LDO Regulators</strong>. Local results are visibly labeled as non-AI fallback output.
                 </p>
               </div>
             </div>
